@@ -24,7 +24,7 @@ void loop() {
   else if (cm < 100) b = 3;
   else if (cm < 200) b = 4;
   else if (cm < 400) b = 5;
-  else                         b = 20;
+  else               b = 20;
   blink(b);
   delay(100);
 }
