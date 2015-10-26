@@ -3,14 +3,13 @@
 #define ECHO 5
 #define LED 6
 #define SPEAKER 12
-#define MAX_CM 100
+#define MAX_CM 200
 #define PLAYMODE_CONTINUOUS 1
 #define PLAYMODE_ARPEGGIO 2
 
 SRF05 Sensor(TRIGGER, ECHO, MAX_CM, 0);
 
 void setup() {
-  Serial.begin(9600);
   pinMode(LED, OUTPUT);
   Sensor.Unlock = true;
 }
@@ -20,9 +19,6 @@ void loop() {
   float cm = Sensor.Distance;
   int potValue = 500; // analogRead(A0);
   if (cm > 0 && cm < MAX_CM) {
-    Serial.print(cm);
-    Serial.print(" ");
-    Serial.println(potValue);
     play(PLAYMODE_ARPEGGIO, cm, potValue);
     digitalWrite(LED, HIGH);
   } else {
