@@ -101,10 +101,7 @@ class RedBlueBlinkEffect: public Effect {
         setColor(0, 0, 255);
         delay(d);
         setColor(0, 0, 0);
-      }
-      if (cm > 150) {
-        setColor(0, 0, 0);
-      }
+      } else setColor(0, 0, 0);
     }
 };
 
