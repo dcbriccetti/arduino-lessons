@@ -1,3 +1,6 @@
+// Hack-o’-Lantern Arduino Pumpkin-Hacking Project
+// Dave Briccetti, October, 2018
+
 #include "SRF05.h"
 #define RED 6
 #define GREEN 10
@@ -6,12 +9,11 @@
 #define ECHO 5
 #define SPEAKER 12
 #define MAX_CM 150
-#define PLAYMODE_CONTINUOUS 1
-#define PLAYMODE_ARPEGGIO 2
-#define SMOOTHING_MS 1500
+#define SMOOTHING_MS 1000
 
 SRF05 Sensor(TRIGGER, ECHO, MAX_CM, 0);
 
+// Abstract base class for multicolor LED effects
 class Effect {
   public:
     virtual void advance(int cm) = 0;
@@ -23,10 +25,10 @@ class Effect {
     }
 };
 
-class HueEffect: public Effect {  // Suggested by and first implemention by Sam Haese
+class HueEffect: public Effect {  // Suggested by, and earlier implementation from, Sam Haese
   private:
-    const int rgbs[28][3] = {
-{255, 0, 0}, {255, 51, 0}, {255, 102, 0}, {255, 153, 0}, {255, 204, 0}, {255, 255, 0}, {204, 255, 0}, {153, 255, 0}, {102, 255, 0}, {51, 255, 0}, {0, 255, 0}, {0, 255, 51}, {0, 255, 102}, {0, 255, 153}, {0, 255, 204}, {0, 255, 255}, {0, 204, 255}, {0, 153, 255}, {0, 102, 255}, {0, 51, 255}, {0, 0, 255}, {51, 0, 255}, {102, 0, 255}, {153, 0, 255}, {204, 0, 255}, {255, 0, 255}, {255, 0, 204}, {255, 0, 153}
+    const int rgbsOfHues[28][3] = {
+      {255, 0, 0}, {255, 51, 0}, {255, 102, 0}, {255, 153, 0}, {255, 204, 0}, {255, 255, 0}, {204, 255, 0}, {153, 255, 0}, {102, 255, 0}, {51, 255, 0}, {0, 255, 0}, {0, 255, 51}, {0, 255, 102}, {0, 255, 153}, {0, 255, 204}, {0, 255, 255}, {0, 204, 255}, {0, 153, 255}, {0, 102, 255}, {0, 51, 255}, {0, 0, 255}, {51, 0, 255}, {102, 0, 255}, {153, 0, 255}, {204, 0, 255}, {255, 0, 255}, {255, 0, 204}, {255, 0, 153}
     };
   public:
     void advance(int cm) {
@@ -34,7 +36,7 @@ class HueEffect: public Effect {  // Suggested by and first implemention by Sam 
         setColor(0, 0, 0);
         return;
       }
-      const int *rgb = rgbs[map(cm, 0, MAX_CM, 0, sizeof rgbs / sizeof rgbs[0] - 1)];
+      const int *rgb = rgbsOfHues[map(cm, 0, MAX_CM, 0, sizeof rgbsOfHues / sizeof rgbsOfHues[0] - 1)];
       setColor(rgb[0], rgb[1], rgb[2]);
     }
 };
@@ -109,7 +111,38 @@ class DistanceSmoother {
     }
 };
 
+class SoundMaker {
+  public:
+    virtual void play(int distanceCm) = 0;
+};
+
+class PitchFromDistanceSoundMaker: public SoundMaker {
+    void play(int cm) {
+      if (cm > 0)
+        tone(SPEAKER, map(cm, 0, MAX_CM, 1000, 100));
+      else noTone(SPEAKER);
+    }
+};
+
+class ArpeggioSoundMaker: public SoundMaker {
+    void play(int cm) {
+      if (cm > 0) {
+        const int noteLength = map(cm, 0, MAX_CM, 50, 500);
+        tone(SPEAKER, 262); // C 4
+        delay(noteLength);
+        tone(SPEAKER, 311); // E-flat 4
+        delay(noteLength);
+        tone(SPEAKER, 524); // C 5
+        delay(noteLength);
+        noTone(SPEAKER);
+        delay(2 * noteLength);
+      }
+      else noTone(SPEAKER);
+    }
+};
+
 Effect *effect = new HueEffect();
+SoundMaker *soundMaker = new ArpeggioSoundMaker(); // PitchFromDistanceSoundMaker();
 DistanceSmoother distanceSmoother = DistanceSmoother();
 
 void setup() {
@@ -127,35 +160,7 @@ void loop() {
     Serial.print("\n");
   }
   effect->advance(cm);
-
-  int potValue = 500; // analogRead(A0);
-  if (cm > 0) {
-    play(PLAYMODE_ARPEGGIO, cm, potValue);
-    const int v = map(cm, 0, MAX_CM, 255, 0);
-  } else {
-    noTone(SPEAKER);
-  }
+  soundMaker->play(cm);
   delay(200);
-}
-
-void play(int mode, float cm, int potValue) {
-  int noteLength;
-  const int maxNoteLength = 200;
-
-  switch (mode) {
-    case PLAYMODE_CONTINUOUS:
-      tone(SPEAKER, (MAX_CM - cm) * potValue / 50);
-      break;
-
-    case PLAYMODE_ARPEGGIO:
-      noteLength = map(cm, 0, MAX_CM, 200, 500); // maxNoteLength);
-      tone(SPEAKER, 262); // C 4
-      delay(noteLength);
-      //tone(SPEAKER, 311); // E-flat 4
-      tone(SPEAKER, 262 * 2); // C 5
-      delay(noteLength);
-      noTone(SPEAKER);
-      delay(2 * noteLength);
-  }
 }
 
