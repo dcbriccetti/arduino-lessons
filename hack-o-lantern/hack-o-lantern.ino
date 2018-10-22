@@ -1,7 +1,8 @@
 // Hack-o’-Lantern Arduino Pumpkin-Hacking Project
 // Dave Briccetti, October, 2018
+// Uses https://github.com/Martinsos/arduino-lib-hc-sr04 library for the rangefinder
 
-#include "SRF05.h"
+#include <HCSR04.h>
 #define RED 6
 #define GREEN 10
 #define BLUE 3
@@ -10,8 +11,6 @@
 #define SPEAKER 12
 #define MAX_CM 150
 #define SMOOTHING_MS 1000
-
-SRF05 Sensor(TRIGGER, ECHO, MAX_CM, 0);
 
 // Abstract base class for multicolor LED effects
 class Effect {
@@ -91,14 +90,34 @@ class GreenYellowRedEffect: public Effect {
     }
 };
 
+// Contributed by Jared Solomon
+class RedBlueBlinkEffect: public Effect {
+  public:
+    void advance(int cm) {
+      if (cm > 0 && cm <= 50) {
+        setColor(255, 0, 0);
+        int d = map(cm, 0, MAX_CM, 10, 200);
+        delay(d);
+        setColor(0, 0, 255);
+        delay(d);
+        setColor(0, 0, 0);
+      }
+      if (cm > 150) {
+        setColor(0, 0, 0);
+      }
+    }
+};
+
+UltraSonicDistanceSensor distanceSensor(TRIGGER, ECHO);
+
 class DistanceSmoother {
   private:
     int lastSd = 0;
     long lastSdMillis = 0;
+
   public:
     int smoothedDistance() {
-      Sensor.Read();
-      int cm = (int) Sensor.Distance;
+      int cm = (int) distanceSensor.measureDistanceCm();
       if (cm > 0 && cm <= MAX_CM) {
         lastSd = cm;
         lastSdMillis = millis();
@@ -141,7 +160,7 @@ class ArpeggioSoundMaker: public SoundMaker {
     }
 };
 
-Effect *effect = new HueEffect();
+Effect *effect = new RedBlueBlinkEffect();
 SoundMaker *soundMaker = new ArpeggioSoundMaker(); // PitchFromDistanceSoundMaker();
 DistanceSmoother distanceSmoother = DistanceSmoother();
 
@@ -149,7 +168,6 @@ void setup() {
   pinMode(RED, OUTPUT);
   pinMode(GREEN, OUTPUT);
   pinMode(BLUE, OUTPUT);
-  Sensor.Unlock = true;
   Serial.begin(9600);
 }
 
