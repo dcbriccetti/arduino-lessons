@@ -9,18 +9,36 @@
 #define TRIGGER 4
 #define ECHO 5
 #define SPEAKER 12
-#define MAX_CM 150
+#define MAX_CM 200
 #define SMOOTHING_MS 1000
+#define COMMON_ANODE
+
+const static int white    [3] = {220, 255, 255};
+const static int green    [3] = {  0, 255,   0};
+const static int orange   [3] = {220, 165,   0};
+const static int yellow   [3] = {180, 255,   0};
+const static int dimYellow[3] = { 40,  10,   0};
+const static int red      [3] = {255,   0,   0};
+const static int blue     [3] = {  0,   0, 255};
+const static int black    [3] = {  0,   0,   0};
 
 // Abstract base class for multicolor LED effects
 class Effect {
   public:
     virtual void advance(int cm) = 0;
+    void setColor(int red, int green, int blue) {
+#ifdef COMMON_ANODE
+      red = 255 - red;
+      green = 255 - green;
+      blue = 255 - blue;
+#endif
+      analogWrite(RED, red);
+      analogWrite(GREEN, green);
+      analogWrite(BLUE, blue);
+    }
 
-    void setColor(int r, int g, int b) {
-      analogWrite(RED, r);
-      analogWrite(GREEN, g);
-      analogWrite(BLUE, b);
+    void setColor(int rgb[3]) {
+      setColor(rgb[0], rgb[1], rgb[2]);
     }
 };
 
@@ -32,7 +50,7 @@ class HueEffect: public Effect {  // Suggested by, and earlier implementation fr
   public:
     void advance(int cm) {
       if (cm == 0) {
-        setColor(0, 0, 0);
+        setColor(black);
         return;
       }
       const int *rgb = rgbsOfHues[map(cm, 0, MAX_CM, 0, sizeof rgbsOfHues / sizeof rgbsOfHues[0] - 1)];
@@ -40,7 +58,7 @@ class HueEffect: public Effect {  // Suggested by, and earlier implementation fr
     }
 };
 
-class VbrEffect: public Effect {
+class VariableBlinkRateEffect: public Effect {
   private:
     long lastStateChangeMs = 0;
     bool on = true;
@@ -48,6 +66,7 @@ class VbrEffect: public Effect {
     void advance(int cm) {
       if (cm == 0) {
         on = false;
+        setColor(black);
         return;
       }
       const int t = map(cm, 0, MAX_CM, 0, 1000);
@@ -55,10 +74,46 @@ class VbrEffect: public Effect {
         on = !on;
         lastStateChangeMs = millis();
       }
-      if (on) {
-        setColor(150, 250, 0);
+      if (on) setColor(yellow);
+      else setColor(black);
+    }
+};
+
+class PeriodEffect: public Effect {
+  protected:
+    long periodStartMs = 0;
+    long periodLen = 0;
+
+    bool periodExpired() { return periodStartMs + periodLen < millis(); }
+    float periodPosition() { return (millis() - periodStartMs) / (float) periodLen; }
+};
+
+class VariableRgbEffect: public PeriodEffect {
+  private:
+    int *c1; int *c2; int *c3; 
+  public:
+    VariableRgbEffect(int *c1, int *c2, int *c3): c1(c1), c2(c2), c3(c3) {}
+    void advance(int cm) {
+      if (cm == 0) {
+        periodStartMs = 0;
+        setColor(black);
+        noTone(SPEAKER);
+        return;
+      }
+      if (periodExpired()) {
+        periodStartMs = millis();
+        periodLen = map(cm, 0, MAX_CM, 10, 5000);
+      }
+      const float ppos = periodPosition();
+      if (ppos < 0.33) {
+        setColor(c1);
+        tone(SPEAKER, 523); // C
+      } else if (ppos < 0.66) {
+        setColor(c2);
+        tone(SPEAKER, 622); // E-flat
       } else {
-        setColor(0, 0, 0);
+        setColor(c3);
+        tone(SPEAKER, 740); // F-sharp
       }
     }
 };
@@ -68,40 +123,22 @@ class DimGreenEffect: public Effect {
       if (cm > 0) {
         const int v = map(cm, 0, MAX_CM, 255, 0);
         setColor(0, v, 0);
-      } else {
-        setColor(0, 0, 0);
-      }
+      } else setColor(black);
     }
 };
 
 class GreenYellowRedEffect: public Effect {
   public:
     void advance(int cm) {
-      if (cm > 0 && cm <= MAX_CM) {
+      if (cm > 0) {
         if (cm > MAX_CM * 2 / 3)
-          setColor(0, 255, 0);
+          setColor(green);
         else if (cm > MAX_CM / 3)
-          setColor(150, 255, 0);
+          setColor(yellow);
         else
-          setColor(255, 0, 0);
-      } else {
-        setColor(40, 20, 0);
-      }
-    }
-};
-
-// Contributed by Jared Solomon
-class RedBlueBlinkEffect: public Effect {
-  public:
-    void advance(int cm) {
-      if (cm > 0 && cm <= 50) {
-        setColor(255, 0, 0);
-        int d = map(cm, 0, MAX_CM, 10, 200);
-        delay(d);
-        setColor(0, 0, 255);
-        delay(d);
-        setColor(0, 0, 0);
-      } else setColor(0, 0, 0);
+          setColor(red);
+      } else
+        setColor(dimYellow);
     }
 };
 
@@ -114,8 +151,9 @@ class DistanceSmoother {
 
   public:
     int smoothedDistance() {
-      int cm = (int) distanceSensor.measureDistanceCm();
-      if (cm > 0 && cm <= MAX_CM) {
+      int dcm = (int) distanceSensor.measureDistanceCm();
+      int cm = dcm == -1 || dcm > MAX_CM ? 0 : dcm;
+      if (cm > 0) {
         lastSd = cm;
         lastSdMillis = millis();
       } else {
@@ -127,39 +165,25 @@ class DistanceSmoother {
     }
 };
 
-class SoundMaker {
+// Calculates inter-ping delay from inactivity length
+class Idler {
+  private:
+    long lastActivityMs = millis();
+    int MIN_DELAY = 10;
+    int MAX_DELAY = 1000;
+    int SLEEP_AFTER = 30000;
   public:
-    virtual void play(int distanceCm) = 0;
-};
-
-class PitchFromDistanceSoundMaker: public SoundMaker {
-    void play(int cm) {
-      if (cm > 0)
-        tone(SPEAKER, map(cm, 0, MAX_CM, 1000, 100));
-      else noTone(SPEAKER);
+    void update(int cm) {
+      if (cm > 0) lastActivityMs = millis();
+    }
+    int delay() {
+      return millis() - lastActivityMs > SLEEP_AFTER ? MAX_DELAY : MIN_DELAY;
     }
 };
 
-class ArpeggioSoundMaker: public SoundMaker {
-    void play(int cm) {
-      if (cm > 0) {
-        const int noteLength = map(cm, 0, MAX_CM, 50, 500);
-        tone(SPEAKER, 262); // C 4
-        delay(noteLength);
-        tone(SPEAKER, 311); // E-flat 4
-        delay(noteLength);
-        tone(SPEAKER, 524); // C 5
-        delay(noteLength);
-        noTone(SPEAKER);
-        delay(2 * noteLength);
-      }
-      else noTone(SPEAKER);
-    }
-};
-
-Effect *effect = new RedBlueBlinkEffect();
-SoundMaker *soundMaker = new ArpeggioSoundMaker(); // PitchFromDistanceSoundMaker();
+Effect *effect = new VariableRgbEffect(yellow, orange, white);
 DistanceSmoother distanceSmoother = DistanceSmoother();
+Idler idler = Idler();
 
 void setup() {
   pinMode(RED, OUTPUT);
@@ -170,12 +194,12 @@ void setup() {
 
 void loop() {
   int cm = distanceSmoother.smoothedDistance();
-  if (cm > 0) {
+  idler.update(cm);
+  if (cm > 0 && false) {
     Serial.print(cm);
     Serial.print("\n");
   }
   effect->advance(cm);
-  soundMaker->play(cm);
-  delay(200);
+  delay(idler.delay());
 }
 
