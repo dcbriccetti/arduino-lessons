@@ -3,24 +3,28 @@
 // Uses https://github.com/Martinsos/arduino-lib-hc-sr04 library for the rangefinder
 
 #include <HCSR04.h>
-#define RED 6
+#define RED 9
 #define GREEN 10
-#define BLUE 3
+#define BLUE 11
 #define TRIGGER 4
 #define ECHO 5
 #define SPEAKER 12
-#define MAX_CM 200
+#define MAX_CM 150
 #define SMOOTHING_MS 1000
+#define TIME_PER_MODE_MS 10000
 #define COMMON_ANODE
 
-const static int white    [3] = {220, 255, 255};
-const static int green    [3] = {  0, 255,   0};
-const static int orange   [3] = {220, 165,   0};
-const static int yellow   [3] = {180, 255,   0};
-const static int dimYellow[3] = { 40,  10,   0};
-const static int red      [3] = {255,   0,   0};
-const static int blue     [3] = {  0,   0, 255};
-const static int black    [3] = {  0,   0,   0};
+struct Rgb {
+  int red; int green; int blue;
+};
+const static Rgb white    = {220, 255, 255};
+const static Rgb green    = {  0, 255,   0};
+const static Rgb orange   = {220, 165,   0};
+const static Rgb yellow   = {180, 255,   0};
+const static Rgb dimYellow = { 40,  10,   0};
+const static Rgb red      = {255,   0,   0};
+const static Rgb blue     = {  0,   0, 255};
+const static Rgb black    = {  0,   0,   0};
 
 // Abstract base class for multicolor LED effects
 class Effect {
@@ -37,45 +41,26 @@ class Effect {
       analogWrite(BLUE, blue);
     }
 
-    void setColor(int rgb[3]) {
-      setColor(rgb[0], rgb[1], rgb[2]);
+    void setColor(Rgb rgb) {
+      setColor(rgb.red, rgb.green, rgb.blue);
     }
 };
 
-class HueEffect: public Effect {  // Suggested by, and earlier implementation from, Sam Haese
+class HueForDistanceEffect: public Effect {  // Suggested by, and earlier implementation from, Sam Haese
   private:
-    const int rgbsOfHues[28][3] = {
-      {255, 0, 0}, {255, 51, 0}, {255, 102, 0}, {255, 153, 0}, {255, 204, 0}, {255, 255, 0}, {204, 255, 0}, {153, 255, 0}, {102, 255, 0}, {51, 255, 0}, {0, 255, 0}, {0, 255, 51}, {0, 255, 102}, {0, 255, 153}, {0, 255, 204}, {0, 255, 255}, {0, 204, 255}, {0, 153, 255}, {0, 102, 255}, {0, 51, 255}, {0, 0, 255}, {51, 0, 255}, {102, 0, 255}, {153, 0, 255}, {204, 0, 255}, {255, 0, 255}, {255, 0, 204}, {255, 0, 153}
+    const int rgbsOfHues[25][3] = {
+      {255, 0, 0}, {255, 51, 0}, {255, 102, 0}, {255, 153, 0}, {255, 204, 0}, {255, 255, 0}, {204, 255, 0}, {153, 255, 0}, {102, 255, 0}, {51, 255, 0}, {0, 255, 0}, {0, 255, 51}, {0, 255, 102}, {0, 255, 153}, {0, 255, 204}, {0, 255, 255}, {0, 204, 255}, {0, 153, 255}, {0, 102, 255}, {0, 51, 255}, {0, 0, 255}, {51, 0, 255}, {102, 0, 255}, {153, 0, 255}, {204, 0, 255}
     };
   public:
     void advance(int cm) {
       if (cm == 0) {
         setColor(black);
+        noTone(SPEAKER);
         return;
       }
-      const int *rgb = rgbsOfHues[map(cm, 0, MAX_CM, 0, sizeof rgbsOfHues / sizeof rgbsOfHues[0] - 1)];
+      const int *rgb = rgbsOfHues[map(cm, 0, MAX_CM, sizeof rgbsOfHues / sizeof rgbsOfHues[0] - 1, 0)];
       setColor(rgb[0], rgb[1], rgb[2]);
-    }
-};
-
-class VariableBlinkRateEffect: public Effect {
-  private:
-    long lastStateChangeMs = 0;
-    bool on = true;
-  public:
-    void advance(int cm) {
-      if (cm == 0) {
-        on = false;
-        setColor(black);
-        return;
-      }
-      const int t = map(cm, 0, MAX_CM, 0, 1000);
-      if (millis() > lastStateChangeMs + t) {
-        on = !on;
-        lastStateChangeMs = millis();
-      }
-      if (on) setColor(yellow);
-      else setColor(black);
+      tone(SPEAKER, map(cm, 0, MAX_CM, 2000, 1000));
     }
 };
 
@@ -84,15 +69,22 @@ class PeriodEffect: public Effect {
     long periodStartMs = 0;
     long periodLen = 0;
 
-    bool periodExpired() { return periodStartMs + periodLen < millis(); }
-    float periodPosition() { return (millis() - periodStartMs) / (float) periodLen; }
+    bool periodExpired() {
+      return periodStartMs + periodLen < millis();
+    }
+    float periodPosition() {
+      return (millis() - periodStartMs) / (float) periodLen;
+    }
 };
 
-class VariableRgbEffect: public PeriodEffect {
+class ColorsAndTonesSpeedWithClosenessEffect: public PeriodEffect {
   private:
-    int *c1; int *c2; int *c3; 
+    int numCycleColors = 0;
+    Rgb * cycleColors;
+    int * frequencies;
   public:
-    VariableRgbEffect(int *c1, int *c2, int *c3): c1(c1), c2(c2), c3(c3) {}
+    ColorsAndTonesSpeedWithClosenessEffect(int numCycleColors, Rgb * cycleColors, int * frequencies):
+      numCycleColors(numCycleColors), cycleColors(cycleColors), frequencies(frequencies) {}
     void advance(int cm) {
       if (cm == 0) {
         periodStartMs = 0;
@@ -105,40 +97,45 @@ class VariableRgbEffect: public PeriodEffect {
         periodLen = map(cm, 0, MAX_CM, 10, 5000);
       }
       const float ppos = periodPosition();
-      if (ppos < 0.33) {
-        setColor(c1);
-        tone(SPEAKER, 523); // C
-      } else if (ppos < 0.66) {
-        setColor(c2);
-        tone(SPEAKER, 622); // E-flat
-      } else {
-        setColor(c3);
-        tone(SPEAKER, 740); // F-sharp
+      for (int i = 0; i < numCycleColors; ++i) {
+        if (ppos < (float) (i + 1) / numCycleColors) {
+          setColor(cycleColors[i]);
+          tone(SPEAKER, frequencies[i]);
+          break;
+        }
       }
     }
 };
 
 class DimGreenEffect: public Effect {
     void advance(int cm) {
-      if (cm > 0) {
-        const int v = map(cm, 0, MAX_CM, 255, 0);
-        setColor(0, v, 0);
-      } else setColor(black);
+      if (cm > 0) setColor(0, map(cm, 0, MAX_CM, 255, 0), 0);
+      else setColor(black);
     }
 };
 
-class GreenYellowRedEffect: public Effect {
+class ColorForDistanceEffect: public Effect {
+  private:
+    int numCycleColors = 0;
+    Rgb * cycleColors;
+    Rgb * idleColor;
   public:
+    ColorForDistanceEffect(int numCycleColors, Rgb * cycleColors, Rgb * idleColor):
+      numCycleColors(numCycleColors), cycleColors(cycleColors), idleColor(idleColor) {}
     void advance(int cm) {
+      noTone(SPEAKER);
+      bool inSegment = false;
       if (cm > 0) {
-        if (cm > MAX_CM * 2 / 3)
-          setColor(green);
-        else if (cm > MAX_CM / 3)
-          setColor(yellow);
-        else
-          setColor(red);
-      } else
-        setColor(dimYellow);
+        int segDist = MAX_CM / numCycleColors;
+        for (int i = 0; ! inSegment && i < numCycleColors; ++i) {
+          if (cm < (i + 1) * segDist) {
+            setColor(cycleColors[i]);
+            inSegment = true;
+          }
+        }
+      }
+      if (! inSegment)
+        setColor(*idleColor);
     }
 };
 
@@ -181,7 +178,18 @@ class Idler {
     }
 };
 
-Effect *effect = new VariableRgbEffect(yellow, orange, white);
+Rgb colors1[3] = {red, yellow, green};
+Rgb colors2[3] = {yellow, orange, white};
+int freqs[3] = {523 /* C */, 622 /* E-flat */, 740 /* F-sharp */};
+
+Effect *effects[] = {
+  new DimGreenEffect(),
+  new ColorsAndTonesSpeedWithClosenessEffect(sizeof colors2 / sizeof colors2[0], colors2, freqs),
+  new HueForDistanceEffect(),
+  new ColorForDistanceEffect(sizeof colors1 / sizeof colors1[0], colors1, &dimYellow)
+};
+#define NUM_EFFECTS (sizeof effects / sizeof effects[0])
+
 DistanceSmoother distanceSmoother = DistanceSmoother();
 Idler idler = Idler();
 
@@ -195,11 +203,11 @@ void setup() {
 void loop() {
   int cm = distanceSmoother.smoothedDistance();
   idler.update(cm);
-  if (cm > 0 && false) {
+  if (cm > 0 && true) {
     Serial.print(cm);
     Serial.print("\n");
   }
-  effect->advance(cm);
+  effects[(millis() / TIME_PER_MODE_MS) % NUM_EFFECTS]->advance(cm);
   delay(idler.delay());
 }
 
