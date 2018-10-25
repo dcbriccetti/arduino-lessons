@@ -74,8 +74,8 @@ class ColorsAndTonesSpeedWithClosenessEffect: public PeriodEffect {
       }
       if (periodExpired()) {
         periodStartMs = millis();
-        periodLen = map(cm, 0, MAX_CM, 10, 5000);
       }
+      periodLen = map(cm, 0, MAX_CM, 10, 5000);
       const float ppos = periodPosition();
       for (int i = 0; i < numCycleColors; ++i) {
         if (ppos < (float) (i + 1) / numCycleColors) {
@@ -155,7 +155,7 @@ Rgb colors2[4] = {red, green, blue, green};
 int freqs[4] = {523 /* C */, 784 /* G */, 831 /* G-sharp */, 784 /* G */};
 
 Effect *effects[] = {
-  //new ColorsAndTonesSpeedWithClosenessEffect(sizeof colors2 / sizeof colors2[0], colors2, freqs),
+  new ColorsAndTonesSpeedWithClosenessEffect(sizeof colors2 / sizeof colors2[0], colors2, freqs),
   new ColorForDistanceEffect(sizeof colors1 / sizeof colors1[0], colors1)
 };
 #define NUM_EFFECTS (sizeof effects / sizeof effects[0])
@@ -177,7 +177,8 @@ void loop() {
     Serial.print(cm);
     Serial.print("\n");
   }
-  effects[(millis() / TIME_PER_MODE_MS) % NUM_EFFECTS]->advance(cm);
+  Effect * effect = effects[(millis() / TIME_PER_MODE_MS) % NUM_EFFECTS];
+  effect->advance(cm);
   delay(idler.delay());
 }
 
