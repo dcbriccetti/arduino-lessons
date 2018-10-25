@@ -3,12 +3,14 @@
 // Uses https://github.com/Martinsos/arduino-lib-hc-sr04 library for the rangefinder
 
 #include <HCSR04.h>
+
 #define RED 9
 #define GREEN 10
 #define BLUE 11
 #define TRIGGER 4
 #define ECHO 5
 #define SPEAKER 12
+
 #define MAX_CM 150
 #define SMOOTHING_MS 1000
 #define TIME_PER_MODE_MS 10000
@@ -17,16 +19,12 @@
 struct Rgb {
   int red; int green; int blue;
 };
-const static Rgb white    = {220, 255, 255};
-const static Rgb green    = {  0, 255,   0};
-const static Rgb orange   = {220, 165,   0};
-const static Rgb yellow   = {180, 255,   0};
-const static Rgb dimYellow = { 40,  10,   0};
-const static Rgb red      = {255,   0,   0};
-const static Rgb blue     = {  0,   0, 255};
-const static Rgb black    = {  0,   0,   0};
+const static Rgb black    =  {  0,   0,   0};
+const static Rgb red      =  {255,   0,   0};
+const static Rgb green    =  {  0, 255,   0};
+const static Rgb blue     =  {  0,   0, 255};
 
-// Abstract base class for multicolor LED effects
+// Abstract base class for multicolor LED and speaker effects
 class Effect {
   public:
     virtual void advance(int cm) = 0;
@@ -43,24 +41,6 @@ class Effect {
 
     void setColor(Rgb rgb) {
       setColor(rgb.red, rgb.green, rgb.blue);
-    }
-};
-
-class HueForDistanceEffect: public Effect {  // Suggested by, and earlier implementation from, Sam Haese
-  private:
-    const int rgbsOfHues[25][3] = {
-      {255, 0, 0}, {255, 51, 0}, {255, 102, 0}, {255, 153, 0}, {255, 204, 0}, {255, 255, 0}, {204, 255, 0}, {153, 255, 0}, {102, 255, 0}, {51, 255, 0}, {0, 255, 0}, {0, 255, 51}, {0, 255, 102}, {0, 255, 153}, {0, 255, 204}, {0, 255, 255}, {0, 204, 255}, {0, 153, 255}, {0, 102, 255}, {0, 51, 255}, {0, 0, 255}, {51, 0, 255}, {102, 0, 255}, {153, 0, 255}, {204, 0, 255}
-    };
-  public:
-    void advance(int cm) {
-      if (cm == 0) {
-        setColor(black);
-        noTone(SPEAKER);
-        return;
-      }
-      const int *rgb = rgbsOfHues[map(cm, 0, MAX_CM, sizeof rgbsOfHues / sizeof rgbsOfHues[0] - 1, 0)];
-      setColor(rgb[0], rgb[1], rgb[2]);
-      tone(SPEAKER, map(cm, 0, MAX_CM, 2000, 1000));
     }
 };
 
@@ -107,21 +87,13 @@ class ColorsAndTonesSpeedWithClosenessEffect: public PeriodEffect {
     }
 };
 
-class DimGreenEffect: public Effect {
-    void advance(int cm) {
-      if (cm > 0) setColor(0, map(cm, 0, MAX_CM, 255, 0), 0);
-      else setColor(black);
-    }
-};
-
 class ColorForDistanceEffect: public Effect {
   private:
     int numCycleColors = 0;
     Rgb * cycleColors;
-    Rgb * idleColor;
   public:
-    ColorForDistanceEffect(int numCycleColors, Rgb * cycleColors, Rgb * idleColor):
-      numCycleColors(numCycleColors), cycleColors(cycleColors), idleColor(idleColor) {}
+    ColorForDistanceEffect(int numCycleColors, Rgb * cycleColors):
+      numCycleColors(numCycleColors), cycleColors(cycleColors) {}
     void advance(int cm) {
       noTone(SPEAKER);
       bool inSegment = false;
@@ -135,7 +107,7 @@ class ColorForDistanceEffect: public Effect {
         }
       }
       if (! inSegment)
-        setColor(*idleColor);
+        setColor(black);
     }
 };
 
@@ -178,15 +150,13 @@ class Idler {
     }
 };
 
-Rgb colors1[3] = {red, yellow, green};
-Rgb colors2[3] = {yellow, orange, white};
-int freqs[3] = {523 /* C */, 622 /* E-flat */, 740 /* F-sharp */};
+Rgb colors1[3] = {red, green, blue};
+Rgb colors2[4] = {red, green, blue, green};
+int freqs[4] = {523 /* C */, 784 /* G */, 831 /* G-sharp */, 784 /* G */};
 
 Effect *effects[] = {
-  new DimGreenEffect(),
-  new ColorsAndTonesSpeedWithClosenessEffect(sizeof colors2 / sizeof colors2[0], colors2, freqs),
-  new HueForDistanceEffect(),
-  new ColorForDistanceEffect(sizeof colors1 / sizeof colors1[0], colors1, &dimYellow)
+  //new ColorsAndTonesSpeedWithClosenessEffect(sizeof colors2 / sizeof colors2[0], colors2, freqs),
+  new ColorForDistanceEffect(sizeof colors1 / sizeof colors1[0], colors1)
 };
 #define NUM_EFFECTS (sizeof effects / sizeof effects[0])
 
